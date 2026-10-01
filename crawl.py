@@ -1,6 +1,7 @@
 from urllib.parse import urlsplit, urljoin
 from bs4 import BeautifulSoup, Tag
 from typing import TypedDict
+import requests
 
 def normalize_url(url: str) -> str:
     split_url = urlsplit(url)
@@ -60,3 +61,11 @@ def extract_page_data(html: str, page_url: str) -> PageData:
     page_data["outgoing_links"] = get_urls_from_html(html, page_url)
     page_data["image_urls"] = get_images_from_html(html, page_url)
     return page_data
+
+def get_html(url):
+    response = requests.get(url, headers={"User-Agent": "BootCrawler/1.0"})
+    if 400 <= response.status_code:
+        raise Exception(f"Status code is {response.status_code}")
+    if not response.headers["Content-Type"].startswith("text/html"):
+        raise Exception("Content-Type is not text/html")
+    return response.text
