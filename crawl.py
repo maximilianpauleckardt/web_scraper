@@ -16,7 +16,6 @@ def get_heading_from_html(html: str) -> str:
         return h_tag.get_text(strip=True) 
     h_tag = soup.find('h2')
     return h_tag.get_text(strip=True) if isinstance(h_tag, Tag) else ""
-    
 
 def get_first_paragraph_from_html(html: str) -> str:
     soup = BeautifulSoup(html,'html.parser')
@@ -69,3 +68,37 @@ def get_html(url):
     if not response.headers["Content-Type"].startswith("text/html"):
         raise Exception("Content-Type is not text/html")
     return response.text
+
+def crawl_page(base_url, current_url=None, page_data=None):
+    if current_url is None:
+        current_url = base_url
+    if page_data is None:
+        page_data = {}
+
+    # 1. Stay on domain
+    if urlsplit(base_url).netloc != urlsplit(current_url).netloc:
+        return page_data
+
+    # 2. Prevent crawling the same page twice
+    normalized_url = normalize_url(current_url)
+    if normalized_url in page_data:
+        return page_data
+
+    # 3. Fetch and extract page data
+    print(f"Crawling: {current_url}")
+    try:
+        html = get_html(current_url)
+    except Exception as e:
+        print(f"Error fetching {current_url}: {e}")
+        return page_data
+
+    extracted_data = extract_page_data(html, current_url)
+    page_data[normalized_url] = extracted_data
+
+    # 4. Recursively crawl outgoing links
+    for link in extracted_data["outgoing_links"]:
+        page_data = crawl_page(base_url, link, page_data)
+
+    return page_data
+                    
+                   

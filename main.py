@@ -1,5 +1,5 @@
 import sys
-from crawl import get_html
+from crawl import   crawl_page
 
 def main():
     if len(sys.argv) < 2:
@@ -11,7 +11,7 @@ def main():
     print("Script name:", sys.argv[0])
     print("Argument:", sys.argv[1])
     print(f"starting crawl of: {sys.argv[1]}")
-    results = get_html(sys.argv[1])
+    results = crawl_page(sys.argv[1])
     print(results)
 
 
