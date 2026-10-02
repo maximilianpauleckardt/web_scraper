@@ -1,12 +1,105 @@
 from urllib.parse import urlsplit, urljoin
 from bs4 import BeautifulSoup, Tag
 from typing import TypedDict
-import requests
+import aiohttp
+import asyncio
+import sys
+
+class AsyncCrawler:
+    def __init__(self, base_url, max_concurrency, max_pages):
+        self.base_url = base_url
+        self.base_domain = urlsplit(base_url).netloc
+        self.page_data = {}
+        self.visited = set()
+        self.lock = asyncio.Lock()
+        self.max_concurrency = max_concurrency
+        self.semaphore = asyncio.Semaphore(max_concurrency)
+        self.session = None
+        self.max_pages = max_pages
+        self.should_stop = False
+        self.all_tasks = set()
+
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.session.close()
+
+    async def add_page_visit(self, normalized_url):
+        if self.should_stop is True:
+            return False
+        if len(self.visited) == self.max_pages:
+            self.should_stop = True
+            print("Reached maximum number of pages to crawl")
+            
+            return False
+        async with self.lock: 
+            if normalized_url in self.visited:
+                return False
+            self.visited.add(normalized_url)
+            return True
+
+    async def get_html(self, url):
+        async with self.session.get(url, headers={"User-Agent": "BootCrawler/1.0"}) as response:
+            if 400 <= response.status:
+                raise Exception(f"Status code is {response.status}")
+            content_type = response.headers.get("Content-Type", "")
+            if not content_type.startswith("text/html"):
+                raise Exception("Content-Type is not text/html")
+            return await response.text()
+        
+    async def crawl_page(self, current_url):
+        if self.should_stop is True:
+            return self.page_data
+    
+        # 1. Stay on domain
+        if urlsplit(current_url).netloc != self.base_domain:
+            return
+
+        # 2. Prevent crawling the same page twice
+        normalized_url = normalize_url(current_url)
+        is_new = await self.add_page_visit(normalized_url)
+        if not is_new:
+            return
+        
+        async with self.semaphore:
+            
+            # 3. Fetch and extract page data
+            print(f"Crawling: {current_url}")
+            try:
+                html = await self.get_html(current_url)
+            except Exception as e:
+                print(f"Error fetching {current_url}: {e}")
+                return self.page_data
+
+            extracted_data = extract_page_data(html, current_url)
+            
+            async with self.lock:
+                self.page_data[normalized_url] = extracted_data
+
+        # 4. Recursively crawl outgoing links
+        tasks = []
+        for link in extracted_data["outgoing_links"]:
+            try: 
+                self.all_tasks.add(tasks.append(asyncio.create_task(self.crawl_page(link))))
+            finally:
+                self.all_tasks.remove(tasks.append(asyncio.create_task(self.crawl_page(link))))
+        await asyncio.gather(*tasks)
+        return self.page_data
+        
+    async def crawl(self):
+        await self.crawl_page(self.base_url)
+        return self.page_data
+
+async def crawl_site_async(starting_url):
+    async with AsyncCrawler(starting_url, sys.argv[2], sys.argv[3]) as crawler:
+        return await crawler.crawl()
 
 def normalize_url(url: str) -> str:
     split_url = urlsplit(url)
     normalized_url = str(split_url.netloc + split_url.path)
-    if normalized_url[-1] == "/": normalized_url = normalized_url.rstrip("/")
+    normalized_url = normalized_url.rstrip("/")
     return normalized_url.lower()
 
 def get_heading_from_html(html: str) -> str:
@@ -59,46 +152,4 @@ def extract_page_data(html: str, page_url: str) -> PageData:
     page_data["first_paragraph"] = get_first_paragraph_from_html(html)
     page_data["outgoing_links"] = get_urls_from_html(html, page_url)
     page_data["image_urls"] = get_images_from_html(html, page_url)
-    return page_data
-
-def get_html(url):
-    response = requests.get(url, headers={"User-Agent": "BootCrawler/1.0"})
-    if 400 <= response.status_code:
-        raise Exception(f"Status code is {response.status_code}")
-    if not response.headers["Content-Type"].startswith("text/html"):
-        raise Exception("Content-Type is not text/html")
-    return response.text
-
-def crawl_page(base_url, current_url=None, page_data=None):
-    if current_url is None:
-        current_url = base_url
-    if page_data is None:
-        page_data = {}
-
-    # 1. Stay on domain
-    if urlsplit(base_url).netloc != urlsplit(current_url).netloc:
-        return page_data
-
-    # 2. Prevent crawling the same page twice
-    normalized_url = normalize_url(current_url)
-    if normalized_url in page_data:
-        return page_data
-
-    # 3. Fetch and extract page data
-    print(f"Crawling: {current_url}")
-    try:
-        html = get_html(current_url)
-    except Exception as e:
-        print(f"Error fetching {current_url}: {e}")
-        return page_data
-
-    extracted_data = extract_page_data(html, current_url)
-    page_data[normalized_url] = extracted_data
-
-    # 4. Recursively crawl outgoing links
-    for link in extracted_data["outgoing_links"]:
-        page_data = crawl_page(base_url, link, page_data)
-
-    return page_data
-                    
-                   
+    return page_data        
