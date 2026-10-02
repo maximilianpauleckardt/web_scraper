@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup, Tag
 from typing import TypedDict
 import aiohttp
 import asyncio
-import sys
 
 class AsyncCrawler:
     def __init__(self, base_url, max_concurrency, max_pages):
@@ -27,14 +26,15 @@ class AsyncCrawler:
         await self.session.close()
 
     async def add_page_visit(self, normalized_url):
-        if self.should_stop is True:
-            return False
-        if len(self.visited) == self.max_pages:
-            self.should_stop = True
-            print("Reached maximum number of pages to crawl")
-            
-            return False
+        
         async with self.lock: 
+            if self.should_stop is True:
+                return False
+            if len(self.visited) >= self.max_pages:
+                self.should_stop = True
+                print("Reached maximum number of pages to crawl.")
+                
+                return False
             if normalized_url in self.visited:
                 return False
             self.visited.add(normalized_url)
@@ -77,23 +77,30 @@ class AsyncCrawler:
             
             async with self.lock:
                 self.page_data[normalized_url] = extracted_data
-
+        
+        if self.should_stop is True:
+            return self.page_data
+        
         # 4. Recursively crawl outgoing links
         tasks = []
         for link in extracted_data["outgoing_links"]:
-            try: 
-                self.all_tasks.add(tasks.append(asyncio.create_task(self.crawl_page(link))))
-            finally:
-                self.all_tasks.remove(tasks.append(asyncio.create_task(self.crawl_page(link))))
-        await asyncio.gather(*tasks)
+            task = asyncio.create_task(self.crawl_page(link))
+            tasks.append(task)
+            self.all_tasks.add(task)
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            for task in tasks: 
+                self.all_tasks.discard(task)
+                
         return self.page_data
         
     async def crawl(self):
         await self.crawl_page(self.base_url)
         return self.page_data
 
-async def crawl_site_async(starting_url):
-    async with AsyncCrawler(starting_url, sys.argv[2], sys.argv[3]) as crawler:
+async def crawl_site_async(starting_url,max_concurrency, max_pages):
+    async with AsyncCrawler(starting_url, max_concurrency, max_pages) as crawler:
         return await crawler.crawl()
 
 def normalize_url(url: str) -> str:
