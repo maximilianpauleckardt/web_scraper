@@ -16,9 +16,7 @@ async def main():
     print("max_pages:", sys.argv[3])
     print(f"starting crawl of: {sys.argv[1]}")
     results = await crawl_site_async(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
-    for page in results.values():
-        print(page)
-    #write_json_report(results)
+    write_json_report(results)
 
 
 if __name__ == "__main__":
